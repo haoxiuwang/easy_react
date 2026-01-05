@@ -1,15 +1,6 @@
-import App from "./app.jsx"
-import React from "./react"
-import "./global.css"
+import React from './miniReact.js';
+import App from './App.jsx';
 
-function render(app) {
-  let root = document.querySelector("#root")
-  app = app.render()
-
-  root.appendChild(app)
-}
-
-
-window.onload = function () {
-  render(<App />)
-}
+const root = document.getElementById('app');
+const app = new React.createElement(App);
+root.appendChild(app.render());

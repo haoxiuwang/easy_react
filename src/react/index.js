@@ -1,245 +1,270 @@
-let _component = null
+// -------------------- Mini React --------------------
+let CURRENT_COMPONENT = null;
 
-function createElement(tag,props,...children) {
-  props = props?props:{}
-  if(children!=undefined)
-  children = children.reduce((arr,item)=>{
-    if (Array.isArray(item)) {
-      arr = [...arr,...item]
-      return arr
-    }
-    arr.push(item)
-    return arr
-  },[])
-
-  if(typeof tag == "string")
-    return new Element(tag,props,children)
-
-  return new Component(tag,props,children)
-}
-export default {createElement}
-class Component {
-  constructor(fn,props,children) {
-    this.states = []
-    this.state_id = 0
-    this.fn = fn
-    props.children = children
-    this.props = props
-    _component = this
-    this.child = this.fn(props)
-    this.child.parent = this
+// -------------------- createElement --------------------
+function createElement(tag, props, ...children) {
+  props = props || {};
+  children = children.flat().map(c => c != null ? c : '');
+  if (typeof tag === "string") {
+    return new VElement(tag, props, children);
+  } else {
+    return new Component(tag, props, children);
   }
+}
+
+// -------------------- Virtual Element --------------------
+class VElement {
+  constructor(tag, props, children) {
+    this.tag = tag;
+    this.props = props;
+    this.children = children;
+    this.dom = null;
+  }
+
   render() {
-    this.node = this.child instanceof Element||this.child instanceof Component?
-    this.child.render():document.createTextNode(this.child)
-    return this.node
-  }
-  refresh() {
-    this.state_id = 0
-    _component = this
-    this.effects = []
-    this.effect_id = 0
-    this.cleanEffect()
-    this.child = this.fn(this.props)
-    let _node = this.node
-    this.render()
-    _node.parentNode.replaceChild(this.node, _node)
-    this.effects.forEach(([_fn,_dependency,_update] , i) => {
-      if (_update)
-        fn.clean = _fn()
-    });
-    this.effect(this)
-  }
-  cleanEffect() {
-    clean(this.child)
-  }
+    const el = document.createElement(this.tag);
 
-}
-function effect(el) {
-  if(el instanceof Component){
-    el.effects.forEach(([a,b,will_do], i) => {
-      will_do&&effect()
-    })
-    effect(el.child)
-    return
-  }
-  else if(el instanceof Element){
-    el.children((item)=>effect(item))
-    return
-  }
-  return
-}
-function clean(el) {
-  if(el instanceof Component){
-    el.effects.forEach(({clean}, i) => {
-      clean()
-    })
-    clean(el.child)
-  }
-  else if(el instanceof Element){
-    el.forEach((item, i) => {
-      clean(item)
-    });
-  }
-  else return
-}
-
-class Element {
-  constructor(tag,props,children) {
-    this.tag = tag
-    this.props = props
-    this.children = children
-    children.map((child)=>{
-      if(child instanceof Element||child instanceof Component)
-        child.parent = this
-    })
-  }
-  render(){
-    let el = document.createElement(this.tag)
-    if(this.props.ref!==undefined)
-    this.props.ref.current = el
-    const {ref,..._props} = this.props
-    Object.assign(el,_props);
-    if(this.children.length==0) return el
-    let children
-    children = this.children.map((child, i) => {
-      if(child instanceof Element||child instanceof Component)
-      return child.render()
-      return document.createTextNode(child)
-    })
-    .map((child)=>el.appendChild(child))
-    return el
-  }
-}
-
-function useState(init) {
-  const _index  = _component.state_id++
-  const _state = _component.states[_index]
-  _component.states[_index] = _state==undefined?init:_state
-
-  let set = (component,index)=>(new_state)=>{
-      const _state = component.states[index]
-      new_state = typeof new_state == "function"?new_state(_state):new_state
-      if(new_state==_state)return
-      component.states[index] = new_state
-      component.refresh()
-  }
-  return [_component.states[_index],set(_component,_index)]
-}
-
-function useRef(init) {
-  const [value] = useState({current:init})
-  return value
-}
-
-function useEffect(fn,dependency){
-  let _index = _component.effect_id++
-  if(_component.effects[_index]==undefined){
-    _component.effects[_index] = [fn,dependency,true]
-    return
-  }
-  if (dependency.length<0) return
-  const [_fn,_dependency,_update] = _component.effects[_index]
-  _component.effects[_index] = [fn,dependency,!light_compare_arr(_dependency,dependency)]
-}
-
-
-function createContext() {
-  let Provider = (component)=>({vlaue,children})=>{
-    let id = component.contexts_id++
-    let context = _component.contexts[id]
-    if (context==undefined)
-      context = {value,handlers:[]}
-    else{
-      if(value!=context.value){
-        context.value = value
-        context.handlers.forEach((fn, i) => {
-          fn(value)
-        });
+    for (let key in this.props) {
+      if (key.startsWith('on') && typeof this.props[key] === 'function') {
+        el.addEventListener(key.slice(2).toLowerCase(), this.props[key]);
+      } else if (key !== 'children' && key !== 'ref') {
+        el[key] = this.props[key];
       }
     }
-    return {children}
-  }
-  return Provider(_component)
-}
 
-function useContext(context) {
-  let _node = _component, _context_el = null
-  while (true) {
-    if(_node instanceof Element)continue
-    if (_node.component == context.Provider) {
-      _context_el = _node
-      break
+    if (this.props.ref) this.props.ref.current = el;
+
+    this.children.forEach(child => {
+      let node;
+      if (child instanceof Component || child instanceof VElement) {
+        node = child.render();
+      } else {
+        node = document.createTextNode(child);
+      }
+      el.appendChild(node);
+    });
+
+    this.dom = el;
+    return el;
+  }
+
+  // Diff & patch
+  patch(newVNode) {
+    const el = this.dom;
+    if (!el) return newVNode.render(); // 没有原节点，直接渲染
+
+    // 类型不同，替换节点
+    if (this.tag !== newVNode.tag) {
+      const newEl = newVNode.render();
+      el.replaceWith(newEl);
+      return newEl;
     }
-    _node = _node.parent
-  }
-  const [value,setValue] = useState(_context_el.props.value)
-  _context_el.handlers.push((v)=>{setValue(v)})
-  return value
-}
 
-function useMemo(fn,dependency){
-  let _index = _component.memo_id++
-  if(_component.memos[_index]==undefined){
-    let result = fn()
-    _component.memos[_index] = [result,dependency]
-    return result
-  }
-  const [_result,_dependency] = _component.memos[_index]
-  let _i = 0
-
-  if (light_compare_arr(_dependency,dependency)) return _result
-  _component.memos[_index] = [fn(),dependency]
-  return fn()
-}
-
-function light_compare_obj(o1,o2) {
-  const arr1 = Object.key(o1)
-  const arr2 = Object.ley(o2)
-  return !(arr1.filter((k)=> o1[k] !== o2[k]).length>0
-  || arr2.filter((k)=> o1[k] !== o2[k]).length>0)
-}
-
-function light_compare_arr(arr1,arr2) {
-  let l = arr1.length,i = 0
-  while (i < l) {
-    if(arr1[i]!==arr2[i])
-    return false
-    i++
-  }
-  return true
-}
-function memo(Com,coparison) {
-  const fn = (component)=>(_props)=>{
-    let _id = component._memos_id++
-    let _cache = component._memos[_id]
-    if(_cache==undefined){
-      let [props,node] = component._memos[_id] = [props,<Com {...{props}}/>]
-      return node
+    // props diff
+    const oldProps = this.props;
+    const newProps = newVNode.props;
+    for (let key in { ...oldProps, ...newProps }) {
+      if (key === 'children') continue;
+      if (key.startsWith('on')) {
+        if (oldProps[key] !== newProps[key]) {
+          if (oldProps[key]) el.removeEventListener(key.slice(2).toLowerCase(), oldProps[key]);
+          if (newProps[key]) el.addEventListener(key.slice(2).toLowerCase(), newProps[key]);
+        }
+      } else if (el[key] !== newProps[key]) {
+        el[key] = newProps[key];
+      }
     }
-    let [props,node] = _cache
-    if(comparison){
-      if(comparison(props,_props))
-      return node
-    }
-    if(light_compare_obj(props,_props))
-    return node
-    [props,node] = component._memos[_id] = [props,<Com {...{props}}/>]
-    return node
-  }
-  return fn(_component)
-}
-function useCallback(fn,dependency) {
-  let _index = _component.callback_id++
-  if(_component.callbacks[_index]==undefined){
 
-    _component.callbacks[_index] = [fn,dependency]
-    return result
+    // children diff
+    const maxLen = Math.max(this.children.length, newVNode.children.length);
+    for (let i = 0; i < maxLen; i++) {
+      const oldChild = this.children[i];
+      const newChild = newVNode.children[i];
+      if (!oldChild) {
+        el.appendChild(newChild instanceof VElement || newChild instanceof Component ? newChild.render() : document.createTextNode(newChild));
+      } else if (!newChild) {
+        el.removeChild(oldChild.dom || oldChild);
+      } else if ((oldChild instanceof VElement) && (newChild instanceof VElement)) {
+        oldChild.patch(newChild);
+      } else if (oldChild instanceof Component || newChild instanceof Component || typeof oldChild !== typeof newChild || oldChild !== newChild) {
+        const newNode = newChild instanceof VElement || newChild instanceof Component ? newChild.render() : document.createTextNode(newChild);
+        el.replaceChild(newNode, oldChild.dom || oldChild);
+      }
+    }
+
+    newVNode.dom = el;
+    return el;
   }
-  const [_fn,_dependency] = _component.callbacks[_index]
-  let _i = 0
-  if (light_compare_arr(_dependency,dependency)) return _fn
-  _component.callbacks[_index] = [fn,dependency]
-  return fn
 }
-export {useState, useRef, useEffect, useCallback, useContext, useMemo, memo}
+
+// -------------------- Component --------------------
+class Component {
+  constructor(fn, props, children) {
+    this.fn = fn;
+    this.props = { ...props, children };
+    this.states = [];
+    this.stateIndex = 0;
+    this.effects = [];
+    this.effectIndex = 0;
+    this.memos = [];
+    this.memoIndex = 0;
+    this.callbacks = [];
+    this.callbackIndex = 0;
+    this.child = null;
+    this.dom = null;
+    this.contexts = {};
+  }
+
+  render() {
+    this.stateIndex = 0;
+    this.effectIndex = 0;
+    this.memoIndex = 0;
+    this.callbackIndex = 0;
+
+    CURRENT_COMPONENT = this;
+    const newChild = this.fn(this.props);
+    let node;
+    if (this.child) {
+      if (this.child instanceof VElement || this.child instanceof Component) {
+        node = this.child.patch(newChild);
+      } else {
+        node = newChild instanceof VElement || newChild instanceof Component ? newChild.render() : document.createTextNode(newChild);
+      }
+    } else {
+      node = newChild instanceof VElement || newChild instanceof Component ? newChild.render() : document.createTextNode(newChild);
+    }
+
+    this.child = newChild;
+    this.dom = node;
+
+    // 执行 effect
+    this.effects.forEach(([fn, deps, cleanup, hasChanged], i) => {
+      if (hasChanged) {
+        if (cleanup) cleanup();
+        const newCleanup = fn();
+        this.effects[i][2] = newCleanup;
+        this.effects[i][3] = true;
+      }
+    });
+
+    return node;
+  }
+
+  refresh() {
+    if (!this.dom || !this.dom.parentNode) return;
+    this.render();
+  }
+}
+
+// -------------------- Hooks --------------------
+function useState(initial) {
+  const comp = CURRENT_COMPONENT;
+  const idx = comp.stateIndex++;
+  if (comp.states[idx] === undefined) comp.states[idx] = initial;
+
+  const setState = (newValue) => {
+    if (typeof newValue === 'function') newValue = newValue(comp.states[idx]);
+    if (newValue === comp.states[idx]) return;
+    comp.states[idx] = newValue;
+    comp.refresh();
+  };
+
+  return [comp.states[idx], setState];
+}
+
+function useRef(initial) {
+  return useState({ current: initial })[0];
+}
+
+function useEffect(fn, deps = []) {
+  const comp = CURRENT_COMPONENT;
+  const idx = comp.effectIndex++;
+  const prev = comp.effects[idx];
+  let hasChanged = true;
+
+  if (prev) {
+    const [, prevDeps] = prev;
+    hasChanged = !deps || deps.some((d, i) => d !== prevDeps[i]);
+  }
+
+  if (!prev) {
+    comp.effects[idx] = [fn, deps, null, true];
+  } else {
+    comp.effects[idx] = [fn, deps, prev[2], hasChanged];
+  }
+}
+
+function useMemo(fn, deps = []) {
+  const comp = CURRENT_COMPONENT;
+  const idx = comp.memoIndex++;
+  const prev = comp.memos[idx];
+  if (prev && deps.every((d, i) => d === prev[1][i])) return prev[0];
+  const value = fn();
+  comp.memos[idx] = [value, deps];
+  return value;
+}
+
+function useCallback(fn, deps = []) {
+  const comp = CURRENT_COMPONENT;
+  const idx = comp.callbackIndex++;
+  const prev = comp.callbacks[idx];
+  if (prev && deps.every((d, i) => d === prev[1][i])) return prev[0];
+  comp.callbacks[idx] = [fn, deps];
+  return fn;
+}
+
+// -------------------- Context --------------------
+function createContext(defaultValue) {
+  const context = { value: defaultValue, subscribers: new Set() };
+
+  function Provider({ value, children }) {
+    context.value = value;
+    context.subscribers.forEach(fn => fn(value));
+    return children;
+  }
+
+  function useContext() {
+    const comp = CURRENT_COMPONENT;
+    const [state, setState] = useState(context.value);
+    context.subscribers.add(setState);
+    return state;
+  }
+
+  return { Provider, useContext };
+}
+
+// -------------------- memo --------------------
+function memo(ComponentFn) {
+  return function Memoized(props) {
+    const comp = CURRENT_COMPONENT;
+    comp.memos = comp.memos || [];
+    const key = props.key || Symbol();
+    const cached = comp.memos.find(([k]) => k === key);
+    if (cached) return cached[1];
+    const element = new Component(ComponentFn, props);
+    comp.memos.push([key, element]);
+    return element;
+ import { useState } from "react"
+
+// -------------------- useReducer --------------------
+function useReducer(reducer,init){
+    const [ctx] = useState(init?init:{})
+    const [_,refresh] = useState(false)
+    ctx.refresh = ()=>{refresh(_=>!_)}
+    ctx.refreshAsync = ()=>{
+        setTimeout(()=>{ctx.refresh()})
+    }
+    ctx.dispatch = async (action)=>{
+        await reducer(ctx,action)
+        ctx.refresh()
+    }
+    ctx._dispatch = async (action)=>{
+        await reducer(ctx,action)        
+    }
+    return ctx
+} };
+}
+
+// -------------------- Export --------------------
+export default { createElement };
+export { useState, useEffect, useRef, useMemo, useCallback, memo, createContext, useReducer };

@@ -1,45 +1,21 @@
-import About from "./pages/about.jsx"
-import Blogs from "./pages/blogs.jsx"
-import Index from "./pages/index.jsx"
-import Portfolio from "./pages/portfolio.jsx"
+import React, { useState, useEffect, createContext, useContext } from './miniReact.js';
+import Counter from './components/Counter.jsx';
+import Button from './components/Button.jsx';
 
-import React from './react'
-import {useState} from "./react"
-export default function App(){
-  const [show,setShow] = useState(0)
-  console.log({show});
+// Context 示例
+const CountContext = createContext(0);
+
+export default function App() {
+  const [globalCount, setGlobalCount] = useState(100);
+
   return (
-    <div>
-        <div className="flex space-x-4 place-items-center place-content-center p-4">
-          {[
-            "Index","Blogs","About","Portfolio"
-          ].map((title,i)=>(<Link {...{title,setShow,show:i}}/>))}
-
-        </div>
-        {
-          (()=>{
-            switch (show) {
-              case 0:
-                return <Index />;
-              case 1:
-                return <Blogs />;
-              case 2:
-                return <About />;
-              case 3:
-                return <Portfolio />;
-
-            }
-          })()
-        }
-    </div>
-  )
-}
-
-function Link({title,setShow,show}) {
-  return (
-    <button id={`_${show}`} className='py-2 px-8 bg-slate-100 rounded' onclick={()=>{
-      console.log("---");
-      setShow(show)
-    }}>{title}</button>
-  )
+    <CountContext.Provider value={globalCount}>
+      <div>
+        <h1>Mini React Demo</h1>
+        <p>Global Count: {globalCount}</p>
+        <Button label="Increase Global" onClick={() => setGlobalCount(c => c + 1)} />
+        <Counter />
+      </div>
+    </CountContext.Provider>
+  );
 }
